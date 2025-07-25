@@ -25,13 +25,13 @@ wheels/
 *.egg
 
 # Virtual environments
-.env/
-.venv/
-venv/
-ENV/
-env/
-env.bak/
-venv.bak/
+# .env/
+# .venv/
+# venv/
+# ENV/
+# env/
+# env.bak/
+# venv.bak/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -81,7 +81,7 @@ ipython_config.py
 # Private files
 *.mp4
 results/
-*.env
+# *.env
 
 # Others
 whisper_src/
