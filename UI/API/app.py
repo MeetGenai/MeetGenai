@@ -18,7 +18,7 @@ load_dotenv()
 COMMON_ENV_PATH = Path(os.getenv("COMMON_ENV_PATH")).resolve()
 
 
-load_dotenv(dotenv_path=COMMON_ENV_PATH)
+load_dotenv()
 
 
 API_HOST = os.getenv("API_HOST")
