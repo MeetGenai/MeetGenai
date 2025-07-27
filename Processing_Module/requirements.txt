@@ -1,0 +1,43 @@
+# -----------------------------------------------------------------
+# Required Python packages for the Transcript Processing Pipeline
+# -----------------------------------------------------------------
+# To install all these packages, run the following command in your
+# terminal from the same directory as this file:
+#
+# pip install -r requirements.txt
+# -----------------------------------------------------------------
+
+# For loading configuration from the .env file
+python-dotenv
+
+# For data manipulation, especially in temporal_segmenter and text_cleaner
+pandas
+
+# For fixing text encoding and Unicode issues in text_cleaner
+ftfy
+
+# For Natural Language Processing (NLP) tasks like Named Entity Recognition
+spacy
+
+# For creating sentence embeddings for topic analysis
+sentence-transformers
+
+# Core library for machine learning, used for clustering in topic_analyzer
+scikit-learn
+
+# Foundational package for scientific computing, used by many ML libraries
+numpy
+
+# PyTorch is a core dependency for sentence-transformers
+torch
+
+# The transformers library is also a core dependency for sentence-transformers
+transformers
+
+# -----------------------------------------------------------------
+# After installing the packages above, you MUST also download the
+# spaCy language model required by the EntityExtractor.
+# Run this command in your terminal:
+#
+# python -m spacy download en_core_web_sm
+# -----------------------------------------------------------------
