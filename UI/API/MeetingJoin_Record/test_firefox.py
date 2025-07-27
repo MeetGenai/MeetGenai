@@ -11,8 +11,52 @@ from record import AudioRecorder
 import os
 import tempfile
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+import requests
+
+load_dotenv(dotenv_path=Path(os.getcwd() + "/MeetingJoin_Record/.env").resolve())
+
+COMMON_ENV_PATH = os.getenv("COMMON_ENV_PATH")
+load_dotenv(dotenv_path=COMMON_ENV_PATH)
+
+API_HOST = os.getenv("API_HOST")
+API_PORT = int(os.getenv("API_PORT"))
+API_ADD_UPDATE_STATUS = os.getenv("API_ADD_UPDATE_STATUS")
+
+cur_pipeline_stage = ""
+
+
+def update_pipeline_status(status):
+    API_URL = API_HOST + ":" +str(API_PORT) + API_ADD_UPDATE_STATUS
+    response = requests.post(
+        API_URL,
+        json={
+            "status": status
+        }
+    )
+    return response
+
+def upload_audio_file(audio_path, api_url="http://localhost:5000/api/upload_audio"):
+        """
+        Uploads an audio file to the specified FastAPI endpoint.
+
+        Args:
+            audio_path (str): Path to the audio file.
+            api_url (str): The endpoint URL (default: local FastAPI audio upload).
+
+        Returns:
+            dict: The API response as a dictionary.
+        """
+
+        with open(audio_path, "rb") as f:
+            files = {'file': (audio_path, f, 'audio/wav')}  # Or use the correct MIME type
+            response = requests.post(api_url, files=files)
+        
+        try:
+            return response.json()
+        except Exception as e:
+            return {'error': str(e), 'status_code': response.status_code, 'text': response.text}
 
 class JoinGoogleMeet:
     def __init__(self):
@@ -175,6 +219,7 @@ class JoinGoogleMeet:
                 time.sleep(1)
         
         raise Exception(f"Failed to click {button_id} after multiple attempts")
+    
 
     def join_meeting(self, meet_link, audio_path, duration):
         try:
@@ -197,8 +242,13 @@ class JoinGoogleMeet:
             #join_button.click()
             print("Successfully joined meeting")
 
+
+
             AudioRecorder().get_audio(audio_path, duration)
             print("Recording completed...")
+            update_pipeline_status("joined")
+            print(audio_path)
+            upload_audio_file(audio_path)
             
             
         except Exception as e:
@@ -224,6 +274,7 @@ def main():
         temp_dir = os.getcwd()
         audio_path = os.path.join(temp_dir, "output.wav")
         meet_link = os.getenv('MEET_LINK')
+        print(temp_dir, meet_link)
         duration=int(os.getenv('RECORDING_DURATION'))
         if not meet_link:
             raise ValueError("MEET_LINK environment variable not set")
@@ -241,5 +292,5 @@ def main():
         if 'bot' in locals():
             bot.driver.quit()
 
-if __name__ == '__main__':
-    main()
+# if __name__ == '__main__':
+#     main()

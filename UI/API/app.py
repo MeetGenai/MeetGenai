@@ -1,16 +1,23 @@
 from fastapi import FastAPI, HTTPException
 import chromadb
 from sentence_transformers import SentenceTransformer
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import subprocess
+from MeetingJoin_Record.test_firefox import main as main_meeting_record
 
 import uuid
 import os
 
+import threading
 from pathlib import Path
 
 
 from dotenv import load_dotenv
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pathlib import Path
 
 load_dotenv()
 
@@ -18,7 +25,7 @@ load_dotenv()
 COMMON_ENV_PATH = Path(os.getenv("COMMON_ENV_PATH")).resolve()
 
 
-load_dotenv()
+load_dotenv(dotenv_path=COMMON_ENV_PATH)
 
 
 API_HOST = os.getenv("API_HOST")
@@ -32,6 +39,7 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 n_results = int(os.getenv("n_results"))
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME")
 
+print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME)
 
 
 
@@ -106,6 +114,14 @@ class ChromaDBClass:
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change to specific origins in production!
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 db = ChromaDBClass()
 db.init_db()
 
@@ -124,17 +140,46 @@ class JoinMeetingInput(BaseModel):
 class StatusInput(BaseModel):
     status: str  # The new status text, e.g., "in progress", "done"
 
+
+
+UPLOAD_DIR = Path("uploaded_audios")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+@app.post("/api/upload_audio")
+async def upload_audio(file: UploadFile = File(...)):
+    # Check file type -- optional but recommended
+    if not file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="File must be an audio type")
+
+    save_path = UPLOAD_DIR / file.filename
+    with save_path.open("wb") as buffer:
+        # Save the audio file chunk by chunk
+        while chunk := await file.read(1024 * 1024):
+            buffer.write(chunk)
+
+    return {"message": "Audio file received successfully", "filename": file.filename}
+
 @app.post("/api/join_meeting")
 def join_meeting(meeting_input: JoinMeetingInput):
-    dotenv_path = Path("../MeetingJoin_Record/.env")
-    with open(dotenv_path, "w") as f:
-        f.write(f"EMAIL_ID={meeting_input.email}\n")
+    print("api join meeting")
+    dotenv_path = Path("./MeetingJoin_Record/.env").resolve()
+    with open(dotenv_path, "a") as f:
+        f.write(f"\nEMAIL_ID={meeting_input.email}\n")
         f.write(f"EMAIL_PASSWORD={meeting_input.password}\n")
         f.write(f"MEET_LINK={meeting_input.link}\n")
 
     # Run the test_firefox.py script
-    script_path = Path("../MeetingJoin_Record/test_firefox.py").resolve()
-    os.system(f"python {script_path} &")
+    # script_path = Path("../MeetingJoin_Record/test_firefox.py").resolve()
+    # print(os.getcwd())
+    # str_path = r"C:\Users\puspak\Desktop\Data Science and AI IITM\hackathon25thJuly\gitRepo\masterMeetGenai\MeetGenai\UI\MeetingJoin_Record\test_firefox.py"
+    # # os.system(f'python "{script_path}" &')
+    # # os.system('cd ..')
+    # os.system("cd ../../../../..")
+    # print(os.getcwd())
+    # os.system(r"Scripts\activate.bat")
+    
+    # subprocess.Popen(["python", str_path])
+    threading.Thread(target=main_meeting_record).start()
     
     return {"message": "Meeting join process started."}
 
@@ -227,4 +272,5 @@ def delete_status():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)
+    # uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)
+    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)

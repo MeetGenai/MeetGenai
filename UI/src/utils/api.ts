@@ -1,6 +1,6 @@
 import { MeetingData } from './storage';
 
-const API_BASE_URL = 'http://localhost:8000';
+const API_BASE_URL = 'http://localhost:5000';
 
 export const joinMeeting = async (meetingData: MeetingData): Promise<void> => {
   const response = await fetch(`${API_BASE_URL}/api/join_meeting`, {

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, VideoIcon, Mail, Lock, Type, ExternalLink } from 'lucide-react';
 
+
 interface NewMeetingFormProps {
   onBack: () => void;
   onJoinMeeting: (meetingData: MeetingData) => void;
@@ -64,12 +65,42 @@ export const NewMeetingForm: React.FC<NewMeetingFormProps> = ({ onBack, onJoinMe
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (validateForm()) {
-      onJoinMeeting(formData);
+    if (!validateForm()) return;
+
+    try {
+      // Show loading state (optional)
+      // setLoading(true);
+
+      const response = await fetch('http://localhost:5000/api/join_meeting', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
+      });
+
+      if (!response.ok) {
+        // Handle errors as needed
+        const err = await response.json();
+        alert(`Failed to join: ${err.message}`);
+        // setLoading(false);
+        return;
+      }
+
+      // Success: get returned data if needed
+      const result = await response.json();
+      onJoinMeeting(formData); // or pass result if needed
+
+      // setLoading(false);
+
+    } catch (error) {
+      alert('Network error, please try again.');
+      // setLoading(false);
     }
   };
+
 
   const handleInputChange = (field: keyof MeetingData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
