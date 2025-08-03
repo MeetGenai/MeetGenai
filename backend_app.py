@@ -5,10 +5,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import subprocess
+
 # from MeetingJoin_Record.test_firefox import main as main_meeting_record
 
 import uuid
 import os
+import sys
 
 import threading
 from pathlib import Path
@@ -19,10 +21,19 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from pathlib import Path
 
+import sys
+
+# parent_dir = Path(__file__).resolve().parent.parent
+# sys.path.append(str(parent_dir))
+
+from main import run
+
+
 load_dotenv()
 
 
-COMMON_ENV_PATH = Path(os.getenv("COMMON_ENV_PATH")).resolve()
+COMMON_ENV_PATH = Path(os.getenv("common_env")).resolve()
+print(COMMON_ENV_PATH)
 
 
 load_dotenv(dotenv_path=COMMON_ENV_PATH)
@@ -39,7 +50,9 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 n_results = int(os.getenv("n_results"))
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME")
 
-print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME)
+AUDIO_UPLOAD_DIR = os.getenv("audio_dir")
+
+print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME, AUDIO_UPLOAD_DIR)
 
 
 
@@ -140,12 +153,16 @@ class JoinMeetingInput(BaseModel):
 class StatusInput(BaseModel):
     status: str  # The new status text, e.g., "in progress", "done"
 
+class PipelineTrigger(BaseModel):
+    meetingSeries: str
+    audioFileName: str
+
 class ClientInfo(BaseModel):
     client_id: str
 
 
 
-UPLOAD_DIR = Path("uploaded_audios")
+UPLOAD_DIR = Path(AUDIO_UPLOAD_DIR)
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 active_clients = set()
@@ -285,6 +302,20 @@ def update_status(status_in: StatusInput):
 
     return {"message": f"Status {action} successfully."}
 
+@app.post("/api/trigger_pipeline")
+def trigger_pipeline(pipelineTriggerData: PipelineTrigger):
+    str_path = r"..\main.py"
+    ret = ""
+    if (pipelineTriggerData.meetingSeries.strip() != ""):
+        run(pipelineTriggerData.audioFileName)
+    else:
+        # ret = subprocess.Popen(["python", str_path, pipelineTriggerData.audioFileName])
+        run(pipelineTriggerData.audioFileName, pipelineTriggerData.meetingSeries)
+    # print(ret)
+
+    return {"message": "Pipeline completed"}
+
+
 
 @app.delete("/api/delete_status")
 def delete_status():
@@ -303,5 +334,5 @@ def delete_status():
 if __name__ == "__main__":
     # uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)
     # print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME)
-    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)
+    uvicorn.run("backend_app:app", host="127.0.0.1", port=5000, reload=True)
     
