@@ -1,163 +1,116 @@
 #!/usr/bin/env python3
 """
-Main script for the end-to-end transcript processing pipeline.
+main.py
 
-This script orchestrates the aggregation and windowed analysis of transcripts.
-It intelligently decides whether to merge multiple files or process a single
-file directly based on the contents of the input directory.
+This script serves as the main entry point for the Advanced Meeting Intelligence Pipeline.
+
+It orchestrates the entire process by:
+1. Loading the application configuration from `app_config.py`.
+2. Using a `PipelineFactory` to construct the full suite of advanced components.
+3. Identifying the input transcript file.
+4. Executing the main `PipelineOrchestrator` to run the multi-stage analysis.
+5. Displaying a final, comprehensive report showcasing the advanced analytics.
 """
-import os
+
 import sys
-import json
-import argparse
-from datetime import datetime
+from pathlib import Path
+from typing import Dict, Any
 
-sys.path.append(r"C:\Users\puspak\Desktop\Data Science and AI IITM\hackathon25thJuly\gitRepoNew\Processing_Module")
-
-# --- Suppress Warnings ---
-os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+# Suppress noisy warnings from third-party libraries for a cleaner output.
 import warnings
-warnings.filterwarnings('ignore', category=RuntimeWarning, module='sklearn')
+warnings.filterwarnings('ignore', category=UserWarning, module='transformers')
+warnings.filterwarnings('ignore', category=FutureWarning, module='transformers')
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-# --- Load Configuration and Factory ---
 try:
-    import config
-    from pipeline_factory import create_transcript_aggregator, create_windowed_processor
-    print(" Pipeline factory loaded successfully.")
+    from app_config import APP_CONFIG
+    from component_factory import PipelineFactory
 except ImportError as e:
-    print(f" Error: A required module is missing: {e}")
+    print(f"  Critical Error: A required module is missing: {e}", file=sys.stderr)
+    print("   Please ensure all project files are present and dependencies are installed.", file=sys.stderr)
     sys.exit(1)
 
-def run_full_pipeline(app_config):
+class Application:
     """
-    Executes the complete aggregation and processing pipeline using a config object.
+    Manages the setup and execution of the advanced transcript analysis pipeline.
     """
-    print("=" * 60)
-    print(" STARTING END-TO-END TRANSCRIPT PIPELINE")
-    print("=" * 60)
-    
-    start_time = datetime.now()
+    def __init__(self):
+        """Initializes the application by building the full pipeline."""
+        self.config = APP_CONFIG
+        factory = PipelineFactory(self.config)
+        self.ingestor = factory.create_ingestor()
+        self.orchestrator = factory.create_orchestrator()
 
-    try:
-        # === STAGE 1: PREPARE TRANSCRIPT DATA ===
-        print("\n--- STAGE 1: PREPARING TRANSCRIPT DATA ---")
+    def run(self) -> None:
+        """
+        Executes the full pipeline from data ingestion to final reporting.
+        """
+        print("\n=================================================")
+        print("     EXECUTING MEETING ANALYSIS PIPELINE  ")
+        print("=================================================\n")
 
         try:
-            files_to_process = [f for f in os.listdir(app_config.input_dir) if f.endswith(".json")]
-        except FileNotFoundError:
-            print(f" Error: Input directory not found at '{app_config.input_dir}'")
-            return {'success': False, 'error': 'Input directory not found.'}
+            # 1. Find and load the transcript data
+            transcript_path = self._find_input_transcript()
+            transcript_data = self.ingestor.load_from_file(transcript_path)
 
-        transcript_to_process = []
-        
-        # Decide action based on the number of files found.
-        if len(files_to_process) == 0:
-            print(" Critical Error: No JSON files found in the input directory. Cannot proceed.")
-            return {'success': False, 'error': 'No JSON files found.'}
-        
-        elif len(files_to_process) == 1:
-            print(" Found a single transcript file. Skipping aggregation/merge step.")
-            aggregator = create_transcript_aggregator()
-            single_file_path = os.path.join(app_config.input_dir, files_to_process[0])
-            transcript_to_process = aggregator.load_and_process_single_transcript(single_file_path)
-        
-        else: # More than one file, requires aggregation.
-            print(f" Found {len(files_to_process)} files. Proceeding with full aggregation.")
-            aggregator = create_transcript_aggregator()
-            transcript_to_process = aggregator.aggregate_from_directory(app_config.input_dir)
-            
-            # Save the intermediate merged transcript for auditing purposes.
-            if transcript_to_process:
-                merged_filename = os.path.join(app_config.output_dir, "00_merged_transcript.json")
-                aggregator.save_transcript(transcript_to_process, merged_filename)
+            # 2. Execute the main orchestrator, which now handles all processing
+            # and saves the final master report internally.
+            self.orchestrator.execute(
+                full_transcript=transcript_data,
+                meeting_date=self.config.meeting_date
+            )
 
-        # Final check if we have any data to process after Stage 1.
-        if not transcript_to_process:
-            print(" Critical Error: No valid transcript data available after initial loading. Cannot proceed.")
-            return {'success': False, 'error': 'No data to process after Stage 1.'}
+            # 3. Display a final confirmation message.
+            self._display_completion_message()
 
-        # === STAGE 2: WINDOWED PROCESSING ===
-        print("\n--- STAGE 2: ANALYZING TRANSCRIPT ---")
-        processor = create_windowed_processor(
-            window_size=app_config.window_size,
-            output_dir=os.path.join(app_config.output_dir, "processed_windows"),
-            base_filename=app_config.base_filename
-        )
+        except (FileNotFoundError, ValueError) as e:
+            print(f"  Data Loading or Validation Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"  An unexpected critical error occurred during pipeline execution:", file=sys.stderr)
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
+    def _find_input_transcript(self) -> Path:
+        """Locates the single .json file in the configured input directory."""
+        print(f"  Searching for transcript in: {self.config.input_dir}")
+        json_files = list(self.config.input_dir.glob("*.json"))
+
+        if not json_files:
+            raise FileNotFoundError(f"No .json transcript files found in '{self.config.input_dir}'")
+        if len(json_files) > 1:
+            print(f"  Warning: Found {len(json_files)} .json files. Using the first one: {json_files[0].name}")
+
+        return json_files[0]
+
+    def _display_completion_message(self) -> None:
+        """Prints a final message pointing the user to the output files."""
+        report_path = self.config.output_dir / "meeting_master_report.json"
+        chunk_dir = self.config.output_dir / "processed_chunks"
         
-        processed_windows = processor.process_transcript(
-            transcript_data=transcript_to_process,
-            meeting_date=app_config.meeting_date
-        )
-        
-        summary_stats = processor.get_summary_statistics(processed_windows)
-
-        # --- FINAL REPORT ---
-        duration = (datetime.now() - start_time).total_seconds()
-        print("\n" + "=" * 60)
-        print(f" PIPELINE COMPLETED SUCCESSFULLY in {duration:.2f}s")
-        print("=" * 60)
-        for key, value in summary_stats.items():
-            print(f"  - {key.replace('_', ' ').title()}: {value}")
-        
-        return {'success': True, 'summary': summary_stats}
-
-    except Exception as e:
-        print(f"\n A critical error occurred during the pipeline execution: {e}")
-        import traceback
-        traceback.print_exc()
-        return {'success': False, 'error': str(e)}
-
-def setup_argument_parser():
-    """Sets up the parser for optional command-line overrides."""
-    parser = argparse.ArgumentParser(
-        description="End-to-end transcript pipeline. Loads settings from .env, which can be overridden by these arguments.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument('--input-dir', default=config.INPUT_DIR,
-                       help=f'Override the input directory. (Default from .env: {config.INPUT_DIR})')
-    parser.add_argument('--output-dir', default=config.OUTPUT_DIR,
-                       help=f'Override the output directory. (Default from .env: {config.OUTPUT_DIR})')
-    parser.add_argument('--window-size', type=int, default=config.WINDOW_SIZE_SECONDS,
-                       help=f'Override analysis window size in seconds. (Default from .env: {config.WINDOW_SIZE_SECONDS})')
-    parser.add_argument('--filename', default=config.BASE_FILENAME,
-                       help=f'Override the base filename for outputs. (Default from .env: {config.BASE_FILENAME})')
-    parser.add_argument('--date', default=config.MEETING_DATE,
-                       help=f'Override the meeting date (YYYY-MM-DD). (Default from .env: {config.MEETING_DATE})')
-    return parser
+        print("\n=================================================")
+        print("            PIPELINE EXECUTION COMPLETE ")
+        print("-------------------------------------------------")
+        print("All analyses have been successfully completed.")
+        print(f"\n  A detailed master report has been saved to:")
+        print(f"   {report_path}")
+        print(f"\n  Individual chunk analyses are located in:")
+        print(f"   {chunk_dir}")
+        print("=================================================")
 
 def main():
-    """Main execution function."""
-    if not config.is_config_valid:
-        sys.exit(1)
-
-    parser = setup_argument_parser()
-    args = parser.parse_args()
-    
-    final_config = argparse.Namespace(
-        input_dir=args.input_dir,
-        output_dir=args.output_dir,
-        window_size=args.window_size,
-        base_filename=args.filename,
-        meeting_date=args.date
-    )
-
-    os.makedirs(final_config.output_dir, exist_ok=True)
-    
+    """
+    The main function that initializes and runs the application.
+    """
     try:
-        results = run_full_pipeline(final_config)
-        
-        if results.get('success'):
-            print("\n Success! All stages complete.")
-        else:
-            print("\n Failure. The pipeline ended with an error.")
-            sys.exit(1)
-            
+        app = Application()
+        app.run()
     except KeyboardInterrupt:
-        print("\n\n Processing interrupted by user. Exiting.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n An unexpected top-level error occurred: {e}")
-        sys.exit(1)
+        print("\n\n  Pipeline execution interrupted by user. Exiting gracefully.")
+        sys.exit(0)
 
-# if __name__ == "__main__":
-#     main()
+if __name__ == "__main__":
+    main()
