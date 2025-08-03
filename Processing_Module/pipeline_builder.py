@@ -53,7 +53,7 @@ def build_processing_pipeline(settings: PipelineSettings):
     windowed_processor = COMPONENT_REGISTRY["windowed_processor"](
         base_processor=meeting_processor,
         window_duration=settings.window_duration_seconds,
-        output_directory=str(settings.output_directory / "processed_windows"),
+        output_directory=str(settings.output_directory / "processed_chunks"),
         output_filename_base=settings.output_filename_base
     )
     

@@ -223,7 +223,7 @@ class MeetingSummaryGeneratorWithContext:
             prompt = self.get_non_contextual_prompt(transcript)
 
         if (prompt != ""):
-            print("prompt to be executed", prompt)
+            # print("prompt to be executed", prompt)
             self.final_summary = self.generate_summary(prompt, model)
             return self.final_summary
         else:
@@ -241,6 +241,7 @@ def create_summary_for_raw_transcript(transcript: str, meeting_summary_gen_obj: 
 
 def get_file_data():
     files = [f for f in os.listdir(input_directory) if os.path.isfile(os.path.join(input_directory, f))]
+    print(files)
     str_file_arr = []
 
     for file in files:
@@ -248,7 +249,7 @@ def get_file_data():
         file_path = input_directory + "/" + file
         with open(file_path, "r") as f:
             tmp_json = json.load(f)
-            tmp_json["context"].pop("conversation_summary")
+            # tmp_json["context"].pop("conversation_summary")
             str_file_arr.append(json.dumps(tmp_json))
     return str_file_arr
 
@@ -263,7 +264,15 @@ def get_detailed_summary(transcript):
     end_index = transcript.find(end)
     return transcript[start_index + len(start): end_index].strip().strip("\n").strip()
 
-def save_meeting_summary(summary, meeting_series):
+
+
+def export(merged_transcript_diarization, file_path=output_directory + "/" +output_file_name):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    print("saving file in ", file_path)
+    with open(file_path, 'w', encoding='utf-8') as f:
+        json.dump(merged_transcript_diarization, f, ensure_ascii=False, indent=2)
+
+def save_meeting_summary_in_db(summary, meeting_series):
     API_URL = API_HOST + ":" +str(API_PORT) + API_ADD_MEETING_ENDPOINT
     response = requests.post(
         API_URL,
@@ -274,31 +283,40 @@ def save_meeting_summary(summary, meeting_series):
     )
     return response
 
+
 def run(meeting_series = None):
+    meeting_summary = None
     # meeting_series = None
     # if (len(sys.argv) >= 2):
     #     meeting_series = sys.argv[1]
-
+    # print("here 1")
 
     db_object = ChromaDBClass()
     db_object.init_db()
-
+    # print("here 2")
     
     files = get_file_data()
+    # print("files", files)
 
     meeting_summary_gen_obj = MeetingSummaryGeneratorWithContext()
     summary_str = ""
-
+    # print("here 3")
+    # print(files)
     for index, file_text in enumerate(files):
+        print("index", index)
 
         cur_summary = create_summary_for_raw_transcript(file_text, meeting_summary_gen_obj, db_object, SUMMARY_GEN_LLM_MODEL_INTERMEDIATE, meeting_series)
-        with open("str_"+str(index)+".txt", "w") as f:
+        
+        temp_path = output_directory + "/temp_files/"+"str_"+str(index)+".txt"
+        os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+        with open(temp_path, "w") as f:
             f.write(cur_summary)
         summary_str += cur_summary
 
     final_summary = create_summary_for_raw_transcript(summary_str, meeting_summary_gen_obj, db_object,SUMMARY_GEN_LLM_MODEL_INTERMEDIATE, meeting_series)
     
     # save_summary_to_db(final_summary)
+    # print("meeting summary", final_summary)
     
 
     with open(output_directory + "/" + output_file_name, "w") as f:
@@ -307,7 +325,15 @@ def run(meeting_series = None):
     if (meeting_series is not None):
         meeting_summary = get_detailed_summary(final_summary)
         ## TODO:save back meeting summary with meeting series
-        response = save_meeting_summary(meeting_summary, meeting_series)
+        with open(output_directory + "/" + output_file_name, "w") as f:
+            f.write(final_summary)
+        
+        response = save_meeting_summary_in_db(meeting_summary, meeting_series)
+
+
+    
+
+        
         print(response)
         
 

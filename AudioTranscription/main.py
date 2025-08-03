@@ -5,6 +5,12 @@ import webrtcvad
 import whisper
 import json
 import os
+import time
+
+
+from pyannote.audio import Pipeline
+
+from collections import Counter
 
 import torchaudio
 from df.enhance import enhance, init_df
@@ -20,6 +26,8 @@ AUDIO_OUTPUTS = os.getenv("AUDIO_OUTPUTS")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL")
 TRANSCRIPT_JSON = os.getenv("TRANSCRIPT_JSON")
 TRANSCRIPT_OUTPUT_PATH = os.getenv("TRANSCRIPT_OUTPUT_PATH")
+
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 def boost_audio(audio_in_path):
     print("boost audio called")
@@ -181,26 +189,114 @@ def format_transcript(transcript):
 
 
 def export(merged_transcript_diarization, file_path=TRANSCRIPT_JSON):
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(merged_transcript_diarization, f, ensure_ascii=False, indent=2)
 
 
-def run(audio_in_path, meeting_metadata_path, output_file_name):
+
+def assign_speaker(transcript, diarization):
+    merged = []
+    for utt in transcript:
+        # Find all diarization segments overlapping this transcript segment
+        start_u, end_u = utt["start"], utt["end"]
+        overlaps = []
+        for (start_d, end_d, speaker) in diarization:
+            # Compute overlap between transcript segment and diarization segment
+            overlap_start = max(start_u, start_d)
+            overlap_end = min(end_u, end_d)
+            overlap = overlap_end - overlap_start
+            if overlap > 0:
+                overlaps.append((overlap, speaker))
+        # Pick the speaker with most overlap
+        if overlaps:
+            speaker = Counter([s for _, s in overlaps]).most_common(1)[0][0]
+        else:
+            speaker = "UNKNOWN"
+        merged.append({
+            "start": start_u,
+            "end": end_u,
+            "speaker": speaker,
+            "text": utt["text"]
+        })
+    return merged
+
+
+def extract_segments(annotation):
+    segments = []
+    for segment, _, speaker in annotation.itertracks(yield_label=True):
+        segments.append((segment.start, segment.end, speaker))
+    return segments
+
+
+
+
+def run(audio_in_path, output_file_name):
     try:
         boost_audio(audio_in_path)
         deep_filter_denoise_chunked(audio_in_path)
-        transcript = transcribe(AUDIO_OUTPUTS)
-        transcript = format_transcript(transcript["segments"])
 
-        meeting_metadata = ""
-        with open(meeting_metadata_path, "r") as f:
-            meeting_metadata = json.load(f)
+
+        ##################
         
-        transcript = [meeting_metadata] + transcript
+        # HF_TOKEN = ""
+        # with open("HF_TOKEN", "r") as f:
+        #     HF_TOKEN = f.read()
+
+
+        print("diarization started")
+        cur_time = time.time()
+        # Replace "YOUR_HF_TOKEN" with your HuggingFace access token.
+        pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization@2.1", use_auth_token=HF_TOKEN)#, device="cuda")
+        pipeline.to(torch.device("cuda"))
+
+        diarization = pipeline(audio_in_path)
+
+        diarization_list = extract_segments(diarization)
+        print("diarization end", time.time() - cur_time)
+
+
+        # for turn, _, speaker in diarization.itertracks(yield_label=True):
+        #     print(f"Speaker {speaker} speaks from {turn.start:.1f}s to {turn.end:.1f}s")
+
+
+        print("transcription started")
+        cur_time = time.time()
+        transcript = transcribe(audio_in_path)
+        transcript = format_transcript(transcript["segments"])
+        print("transcription end", time.time() - cur_time)
+        # print("Transcript: ", transcript)
+
+        print("merging transcription and diarization")
+        cur_time = time.time()
+        merged = assign_speaker(transcript, diarization_list)
+        print("merging end", time.time() - cur_time)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # transcript = transcribe(AUDIO_OUTPUTS)
+        # transcript = format_transcript(transcript["segments"])
+
+        # meeting_metadata = ""
+        # with open(meeting_metadata_path, "r") as f:
+        #     meeting_metadata = json.load(f)
+        
+        # transcript = [meeting_metadata] + transcript
 
         # export(transcript, "final_transcribed.json")
-        output_transcript_path = audio_in_path.strip().split
-        export(transcript, TRANSCRIPT_OUTPUT_PATH + "/" + output_file_name)
+        # output_transcript_path = audio_in_path.strip().split  -- don't use
+        export(merged, TRANSCRIPT_OUTPUT_PATH + "/" + output_file_name)
         
     except Exception as e:
         raise e

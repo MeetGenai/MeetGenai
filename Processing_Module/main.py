@@ -15,6 +15,12 @@ It orchestrates the entire process by:
 import sys
 from pathlib import Path
 from typing import Dict, Any
+import os
+
+current_dir = os.getcwd()
+
+# sys.path.append(r"C:\Users\puspak\Desktop\Data Science and AI IITM\hackathon25thJuly\gitRepoNew\Processing_Module")
+sys.path.append(current_dir + r"\Processing_Module")
 
 # Suppress noisy warnings from third-party libraries for a cleaner output.
 import warnings
@@ -112,5 +118,5 @@ def main():
         print("\n\n  Pipeline execution interrupted by user. Exiting gracefully.")
         sys.exit(0)
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
