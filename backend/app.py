@@ -1,16 +1,23 @@
 from fastapi import FastAPI, HTTPException
 import chromadb
 from sentence_transformers import SentenceTransformer
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import subprocess
+# from MeetingJoin_Record.test_firefox import main as main_meeting_record
 
 import uuid
 import os
 
+import threading
 from pathlib import Path
 
 
 from dotenv import load_dotenv
+
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from pathlib import Path
 
 load_dotenv()
 
@@ -32,6 +39,7 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME")
 n_results = int(os.getenv("n_results"))
 EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME")
 
+print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME)
 
 
 
@@ -59,18 +67,20 @@ class ChromaDBClass:
             self.collection = self.client.get_or_create_collection(name=COLLECTION_NAME)
 
 
-    def store_meeting_summary(self, meeting_id, summary_text, meeting_series, is_latest=False):
+    def store_meeting_summary(self, meeting_id, summary_text, meeting_series):
+        
+        # Generate embedding
         embedding = self.embedding_model.encode([summary_text])
+        
+        # Store in vector database
         self.collection.add(
             embeddings=embedding.tolist(),
             documents=[summary_text],
             metadatas=[{
                 "meeting_series": meeting_series,
-                "latest": is_latest     # Store the latest status
             }],
             ids=[meeting_id]
         )
-
     
     def get_relevant_docs(self, cur_meeting_summary, cur_meeting_series):
         query_embedding = self.embedding_model.encode([cur_meeting_summary])
@@ -104,6 +114,14 @@ class ChromaDBClass:
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change to specific origins in production!
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 db = ChromaDBClass()
 db.init_db()
 
@@ -114,15 +132,92 @@ class MeetingInput(BaseModel):
     meetingSeries: str = None
     # type: str  # 'new' or 'existing'
 
+class JoinMeetingInput(BaseModel):
+    link: str
+    email: str
+    password: str
+
 class StatusInput(BaseModel):
     status: str  # The new status text, e.g., "in progress", "done"
+
+class ClientInfo(BaseModel):
+    client_id: str
+
+
+
+UPLOAD_DIR = Path("uploaded_audios")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+active_clients = set()
+completed_clients = set()
+lock = threading.Lock()
+
+def perform_central_task():
+    ##TODO: call the main pipeline
+    pass
+
+@app.post("/api/register")
+def register_client(info: ClientInfo):  # Includes unique or auto-generated client_id
+    with lock:
+        active_clients.add(info.client_id)
+    return {"message": "Registered"}
+
+@app.post("/api/report_done")
+def report_done(info: ClientInfo):
+    with lock:
+        completed_clients.add(info.client_id)
+        if active_clients and active_clients == completed_clients:
+            # All currently-known clients are done!
+            threading.Thread(target=perform_central_task).start()
+            active_clients.clear()
+            completed_clients.clear()
+    return {"message": "Done"}
+
+
+@app.post("/api/upload_audio")
+async def upload_audio(file: UploadFile = File(...)):
+    # Check file type -- optional but recommended
+    if not file.content_type.startswith("audio/"):
+        raise HTTPException(status_code=400, detail="File must be an audio type")
+
+    save_path = UPLOAD_DIR / file.filename
+    with save_path.open("wb") as buffer:
+        # Save the audio file chunk by chunk
+        while chunk := await file.read(1024 * 1024):
+            buffer.write(chunk)
+
+    return {"message": "Audio file received successfully", "filename": file.filename}
+
+# @app.post("/api/join_meeting")
+# def join_meeting(meeting_input: JoinMeetingInput):
+#     print("api join meeting")
+#     dotenv_path = Path("./MeetingJoin_Record/.env").resolve()
+#     with open(dotenv_path, "a") as f:
+#         f.write(f"\nEMAIL_ID={meeting_input.email}\n")
+#         f.write(f"EMAIL_PASSWORD={meeting_input.password}\n")
+#         f.write(f"MEET_LINK={meeting_input.link}\n")
+
+#     # Run the test_firefox.py script
+#     # script_path = Path("../MeetingJoin_Record/test_firefox.py").resolve()
+#     # print(os.getcwd())
+#     # str_path = r"C:\Users\puspak\Desktop\Data Science and AI IITM\hackathon25thJuly\gitRepo\masterMeetGenai\MeetGenai\UI\MeetingJoin_Record\test_firefox.py"
+#     # # os.system(f'python "{script_path}" &')
+#     # # os.system('cd ..')
+#     # os.system("cd ../../../../..")
+#     # print(os.getcwd())
+#     # os.system(r"Scripts\activate.bat")
+    
+#     # subprocess.Popen(["python", str_path])
+#     threading.Thread(target=main_meeting_record).start()
+    
+#     return {"message": "Meeting join process started."}
 
 @app.get("/api/get_meeting_series")
 def get_meeting_series():
     # Example: fetch all unique meeting_series from db.collection metadata
-    # print("in get meeting series")
+    print("in get meeting series")
     results = db.collection.get(where={"meeting_series": "testing context"})
-    # print(results)
+    print(results)
 
     docs = db.collection.get(include=["metadatas"])
     # all_records = db.collection.get()
@@ -135,25 +230,24 @@ def get_meeting_series():
             series_set.add(meta["meeting_series"])
     return {"series": list(series_set)}
 
-
 @app.post("/api/add_meeting")
 def add_meeting(meeting: MeetingInput):
-    meeting_series = meeting.meetingSeries
-    # 1. Fetch all meetings in this series
-    results = db.collection.get(where={"meeting_series": meeting_series})
-    # 2. Remove "latest" from the current latest document (if any)
-    for idx, meta in enumerate(results.get("metadatas", [])):
-        if meta.get("latest"):
-            db.collection.update(
-                ids=[results["ids"][idx]],
-                metadatas=[{"latest": False}]
-            )
-
-    # 3. Insert the new meeting summary with "latest": True
+    # Validate meeting series uniqueness
+    # existing_series = {
+    #     ms["meeting_series"]
+    #     for ms in db.collection.get(include=["metadatas"])["metadatas"]
+    #     if ms.get("meeting_series")
+    # }
+    # if meeting.type == "new" and meeting.meetingSeries in existing_series:
+    #     raise HTTPException(status_code=400, detail="Meeting series already exists.")
+    # Store meeting summary (using meetingLink as dummy summary here)
+    # meeting_id = meeting.emailId + "_" + meeting.meetingLink
+    # meeting_id = db.get_next_meeting_id()
+    
     meeting_id = str(uuid.uuid4())
-    db.store_meeting_summary(meeting_id, meeting.summary, meeting_series, is_latest=True)
-    return {"message": "Meeting saved successfully.", "meeting_id": meeting_id}
-
+    print(meeting_id, "meeting id")
+    db.store_meeting_summary(meeting_id, meeting.summary, meeting.meetingSeries)
+    return {"message": "Meeting saved successfully."}
 
 @app.get("/api/get_status")
 def get_meeting_series():
@@ -190,21 +284,6 @@ def update_status(status_in: StatusInput):
         action = "inserted"
 
     return {"message": f"Status {action} successfully."}
-@app.get("/api/get_latest_meeting_summary")
-def get_latest_meeting_summary(meeting_series: str):
-    print(meeting_series.strip('"'))
-    meeting_series = meeting_series.strip('"')
-    results = db.collection.get(where={"meeting_series": meeting_series})
-    print(results)
-    for idx, meta in enumerate(results.get("metadatas", [])):
-        if meta.get("latest"):
-            return {
-                "meeting_id": results["ids"][idx],
-                "summary": results["documents"][idx],
-                "metadata": meta
-            }
-    return {"message": "No latest meeting found for this series."}
-
 
 
 @app.delete("/api/delete_status")
@@ -222,4 +301,7 @@ def delete_status():
 
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)
+    # uvicorn.run("app:app", host=API_HOST, port=API_PORT, reload=True)
+    # print(API_HOST, API_PORT, DB_HOST, DB_PORT, COLLECTION_NAME, n_results, EMBEDDING_MODEL_NAME)
+    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)
+    
